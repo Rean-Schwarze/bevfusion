@@ -60,6 +60,14 @@ Here, BEVFusion only uses a single model without any test time augmentation. BEV
 
 ## Usage
 
+### Clone
+
+```shell
+git clone https://github.com/Rean-Schwarze/bevfusion.git
+```
+
+如果 clone 的是本仓库代码，代码文件修改和新增部分可以跳过（仅做检测推理的话）
+
 ### Prerequisites
 
 The code is built with following libraries:
@@ -74,11 +82,72 @@ The code is built with following libraries:
 - [mmdetection](http://github.com/open-mmlab/mmdetection) = 2.20.0
 - [nuscenes-dev-kit](https://github.com/nutonomy/nuscenes-devkit)
 
+#### AutoDL version
+
+省钱小技巧：先随便选**一个** GPU，把依赖装好，数据解压、转换好之后，再升配置（
+
+install openmpi
+
+```shell
+wget https://download.open-mpi.org/release/open-mpi/v4.0/openmpi-4.0.4.tar.gz
+mkdir openmpi
+gunzip -c openmpi-4.0.4.tar.gz | tar xf - \
+    && cd openmpi-4.0.4 \
+    && ./configure --prefix=/root/autodl-tmp/openmpi/ --with-cuda \
+    && make all install
+```
+
+edit "/etc/profile"
+
+```shell
+export PATH=/root/autodl-tmp/openmpi/bin:$PATH
+export LD_LIBRARY_PATH=/root/autodl-tmp/openmpi/lib:$LD_LIBRARY_PATH
+```
+
+restart
+
+```shell
+source /etc/profile
+```
+
+update **apt-get**
+
+```shell
+sudo apt-get update
+sudo apt-get upgrade
+```
+
+other dependencies
+
+```shell
+# 安装mpi4py时依赖openmpi,不然会报错fatal error: mpi.h
+sudo apt-get install wget libgl1-mesa-glx libglib2.0-0 openmpi-bin openmpi-common libopenmpi-dev libgtk2.0-dev git -y
+```
+
+```shell
+pip install Pillow==8.4.0 tqdm torchpack nuscenes-devkit mpi4py==3.0.3 numba==0.48.0 setuptools==56.1.0 ninja==1.11.1 numpy==1.23.4 opencv-python==4.8.0.74 opencv-python-headless==4.8.0.74 yapf==0.40.1
+pip install mmcv-full==1.4.0 -f https://download.openmmlab.com/mmcv/dist/cu111/torch1.9.0/index.html
+pip install mmdet==2.20.0
+```
+
+time cost: ~30min
+
+#### Other
+
+1. 将 mmdet3d/ops/spconv/src/indice_cuda.cu 文件里面所有的 4096 改为 256
+2. 算力更改：setup.py 文件中第 22 行左右，只保留一行 "-gencode=arch=compute_86,code=sm_86"
+
+- 参数 86 就是自己显卡的算力根据实际修改，[显卡算力查询](https://developer.nvidia.com/cuda-gpus)
+
+![](https://rean-blog-bucket.oss-cn-guangzhou.aliyuncs.com/assets/img/1729164095080-b2f06e00-cd76-410a-8c39-aaa1752aa387.png)
+
 After installing these dependencies, please run this command to install the codebase:
 
 ```bash
 python setup.py develop
 ```
+
+time cost: ~10min
 
 We also provide a [Dockerfile](docker/Dockerfile) to ease environment setup. To get started with docker, please make sure that `nvidia-docker` is installed on your machine. After that, please execute the following command to build the docker image:
 
@@ -107,6 +176,58 @@ You can then create a symbolic link `data` to the `/dataset` directory in the do
 
 Please follow the instructions from [here](https://github.com/open-mmlab/mmdetection3d/blob/master/docs/en/datasets/nuscenes_det.md) to download and preprocess the nuScenes dataset. Please remember to download both detection dataset and the map extension (for BEV map segmentation). After data preparation, you will be able to see the following directory structure (as is indicated in mmdetection3d):
 
+Note: Please ensure that your device has at least 500GB of free space if you use the **full** dataset of nuScenes.
+
+##### AutoDL version
+
+tip: 使用 pigz 可加快解压
+
+```shell
+sudo apt install pigz
+mkdir data
+mkdir data/nuscenes
+mkdir data/nuscenes/maps
+unzip -d /root/autodl-tmp/bevfusion/data/nuscenes/maps /root/autodl-pub/nuScenes/Mapexpansion/nuScenes-map-expansion-v1.3.zip
+tar --use-compress-program=pigz -xvpf /root/autodl-pub/nuScenes/Fulldatasetv1.0/Test/v1.0-test_blobs.tgz -C /root/autodl-tmp/bevfusion/data/nuscenes
+tar --use-compress-program=pigz -xvpf /root/autodl-pub/nuScenes/Fulldatasetv1.0/Test/v1.0-test_meta.tgz -C /root/autodl-tmp/bevfusion/data/nuscenes
+cd /root/autodl-pub/nuScenes/Fulldatasetv1.0/Trainval
+for tar in *.tgz;  do tar --use-compress-program=pigz -xvpf $tar -C /root/autodl-tmp/bevfusion/data/nuscenes; done
+export PYTHONPATH="/root/autodl-tmp/bevfusion":$PYTHONPATH
+```
+
+time cost
+
+```shell
+decompress test_blob: ~13min (not using pigz) ~9min (using pigz)
+decompress full dataset: ~1h (using pigz)
+```
+
+##### Data convert
+
+modify "mmdet3d/ops/**init**.py"
+
+```shell
+# from .feature_decorator import feature_decorator
+# 把上面这行注释掉
+```
+
+更改 tools/data_converter/nuscenes_converter.py 中第 95~100 行，如下图
+
+![](https://rean-blog-bucket.oss-cn-guangzhou.aliyuncs.com/assets/img/1729338664028-699ff04a-1f5a-4a79-a05a-ce02368f224a.png)
+
+```shell
+python tools/create_data.py nuscenes --root-path ./data/nuscenes --out-dir ./data/nuscenes --extra-tag nuscenes
+```
+
+time cost
+
+```
+create pkl: ~3h36min
+create database: ~2h20min
+```
+
+After data preparation, you will be able to see the following directory structure (as is indicated in mmdetection3d):
+
 ```
 mmdetection3d
 ├── mmdet3d
@@ -129,7 +250,69 @@ mmdetection3d
 
 ### Evaluation
 
+在 AutoDL 中使用，修改"tools/test.py"：
+
+```python
+    # dist.init()
+    # torch.cuda.set_device(dist.local_rank())
+
+    # init distributed env first, since logger depends on the dist info.
+    # distributed = False
+    cfg.dist_params = dict(backend='nccl')
+    print("args.launcher", args.launcher)    
+    if args.launcher == 'none':
+        distributed = False
+    else:
+        distributed = True
+        init_dist(args.launcher, **cfg.dist_params)
+```
+
+在 "tools" 中新增 "dist_test.sh":
+
+```python
+#!/usr/bin/env bash
+
+CONFIG=$1
+CHECKPOINT=$2
+GPUS=$3
+PORT=${PORT:-29503}
+
+PYTHONPATH="$(dirname $0)/..":$PYTHONPATH \
+python -m torch.distributed.launch --nproc_per_node=$GPUS --master_port=$PORT \
+    $(dirname "$0")/test.py $CONFIG $CHECKPOINT --launcher pytorch ${@:4} --eval bbox --out det.pkl
+```
+
+终端中运行：
+
+```python
+sudo chmod +777 ./tools/dist_test.sh
+```
+
+------
+
 We also provide instructions for evaluating our pretrained models. Please download the checkpoints using the following script: 
+
+First edit "tools/doload_pretrained.sh" to:
+
+```bash
+mkdir -p pretrained && \
+cd pretrained && \
+wget -O bevfusion-det.pth https://hanlab18.mit.edu/projects/bevfusion/files/pretrained_updated/bevfusion-det.pth && \
+wget -O bevfusion-seg.pth https://hanlab18.mit.edu/projects/bevfusion/files/pretrained_updated/bevfusion-seg.pth && \
+wget -O lidar-only-det.pth https://hanlab18.mit.edu/projects/bevfusion/files/pretrained/lidar-only-det.pth && \
+wget -O lidar-only-seg.pth https://hanlab18.mit.edu/projects/bevfusion/files/pretrained/lidar-only-seg.pth && \
+wget -O camera-only-det.pth https://hanlab18.mit.edu/projects/bevfusion/files/pretrained_updated/camera-only-det.pth && \
+wget -O camera-only-seg.pth https://hanlab18.mit.edu/projects/bevfusion/files/pretrained_updated/camera-only-seg.pth && \
+wget -O swint-nuimages-pretrained.pth https://hanlab18.mit.edu/projects/bevfusion/files/pretrained_updated/swint-nuimages-pretrained.pth
+```
+
+if you use AutoDL, you can enable turbo:
+
+```bash
+source /etc/network_turbo
+```
+
+then run:
 
 ```bash
 ./tools/download_pretrained.sh
@@ -147,11 +330,85 @@ For example, if you want to evaluate the detection variant of BEVFusion, you can
 torchpack dist-run -np 8 python tools/test.py configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml pretrained/bevfusion-det.pth --eval bbox
 ```
 
+AutoDL version:
+
+其中最后的数字 2 是 GPU 个数，按需要改
+
+```bash
+./tools/dist_test.sh ./configs/nuscenes/det/transfusion/secfpn/camera+lidar/swint_v0p075/convfuser.yaml ./pretrained/bevfusion-det.pth 2
+```
+
+time cost: ~15min (2 3080x2 GPU)
+
+注意：不能直接进行分割的推理，分割和推理需要的转换的数据集不同（很无语好吧
+
+1. 修改 "bevfusion/tools/data_converter/nuscenes_converter.py"
+
+![](https://rean-blog-bucket.oss-cn-guangzhou.aliyuncs.com/assets/img/1729415941563-c61cc23d-00df-45ac-894b-75250e059ead.webp)
+
+```python
+        location = nusc.get(
+            "log", nusc.get("scene", sample["scene_token"])["log_token"]
+        )["location"]
+        
+        "location": location,
+```
+
+2. 修改 "bevfusion/mmdet3d/datasets/nuscenes_dataset.py"
+
+![](https://rean-blog-bucket.oss-cn-guangzhou.aliyuncs.com/assets/img/1729416004252-f37e14d6-ab1f-41dd-9f89-d6c52c02b679.webp)
+
+3. 重新进行数据集转换
+
 While for the segmentation variant of BEVFusion, this command will be helpful:
 
 ```bash
 torchpack dist-run -np 8 python tools/test.py configs/nuscenes/seg/fusion-bev256d2-lss.yaml pretrained/bevfusion-seg.pth --eval map
 ```
+
+### Common Errors
+
+#### ImportError: cannot import name 'feature_decorator_ext' from partially initialized module 'mmdet3d.ops.feature_decorator' (most likely due to a circular import) (/data/bevfusion/mmdet3d/ops/feature_decorator/__init__.py)
+
+1. setup.py :
+
+Add the below.
+
+```python
+make_cuda_ext(
+    name="feature_decorator_ext",
+    module="mmdet3d.ops.feature_decorator",
+    sources=["src/feature_decorator.cpp"],
+    sources_cuda=["src/feature_decorator_cuda.cu"],
+)
+```
+
+and run
+
+```bash
+python setup.py develop
+```
+
+2. mmdet3d\ops\feature_decorator\src\feature_decorator.cpp :
+
+Delete the below.
+
+```cpp
+static auto registry =
+torch::RegisterOperators("feature_decorator_ext::feature_decorator_forward", &feature_decorator_forward);
+```
+
+#### ModuleNotFoundError: No module named 'flash_attn'
+
+Comment "autodl-tmp/bevfusion/mmdet3d/models/backbones/__init__.py"
+
+```python
+# from .radar_encoder import *
+```
+
+#### File "/root/bevfusion/mmdet3d/datasets/pipelines/loading.py", line 294, in __call__ location = data["location"] KeyError: 'location'
+
+看上面
 
 ### Training
 

@@ -19,9 +19,6 @@ def make_cuda_ext(
             "-D__CUDA_NO_HALF_OPERATORS__",
             "-D__CUDA_NO_HALF_CONVERSIONS__",
             "-D__CUDA_NO_HALF2_OPERATORS__",
-            "-gencode=arch=compute_70,code=sm_70",
-            "-gencode=arch=compute_75,code=sm_75",
-            "-gencode=arch=compute_80,code=sm_80",
             "-gencode=arch=compute_86,code=sm_86",
         ]
         sources += sources_cuda
@@ -164,6 +161,12 @@ if __name__ == "__main__":
                 module="mmdet3d.ops.gather_points",
                 sources=["src/gather_points_cpu.cpp"],
                 sources_cuda=["src/gather_points_cuda.cu"],
+            ),
+            make_cuda_ext(
+                name="feature_decorator_ext",
+                module="mmdet3d.ops.feature_decorator",
+                sources=["src/feature_decorator.cpp"],
+                sources_cuda=["src/feature_decorator_cuda.cu"],
             ),
         ],
         cmdclass={"build_ext": BuildExtension},
