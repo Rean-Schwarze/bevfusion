@@ -141,7 +141,7 @@ def main():
 
     cfg.model.pretrained = None
     # in case the test dataset is concatenated
-    samples_per_gpu = 1
+    samples_per_gpu = cfg.data.samples_per_gpu
     if isinstance(cfg.data.test, dict):
         cfg.data.test.test_mode = True
         samples_per_gpu = cfg.data.test.pop("samples_per_gpu", 1)

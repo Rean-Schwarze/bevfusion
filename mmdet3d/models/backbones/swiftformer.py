@@ -3,10 +3,12 @@ SwiftFormer
 """
 import os
 import copy
+from collections import OrderedDict
+
 import torch
 import torch.nn as nn
 from mmdet.models import BACKBONES
-from mmcv.runner import load_checkpoint
+from mmcv.runner import _load_checkpoint
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from timm.models.layers import DropPath, trunc_normal_
 # from timm.models.registry import register_model
@@ -409,8 +411,7 @@ class SwiftFormer(nn.Module):
             elif pretrained is not None:
                 ckpt_path = pretrained
 
-            ckpt = load_checkpoint(
-                model=self, filename=ckpt_path, logger=logger, map_location='cpu')
+            ckpt = _load_checkpoint(ckpt_path, logger=logger, map_location='cpu')
             if 'state_dict' in ckpt:
                 _state_dict = ckpt['state_dict']
             elif 'model' in ckpt:
@@ -418,9 +419,21 @@ class SwiftFormer(nn.Module):
             else:
                 _state_dict = ckpt
 
+            # unexpected_keys = ['norm.weight', 'norm.bias', 'norm.running_mean', 'norm.running_var']
+            # missing_keys_prefixes = ['norm0', 'norm2', 'norm4', 'norm6']
+            # for prefix in missing_keys_prefixes:
+            #     for key in unexpected_keys:
+            #         new_key = key.replace('norm', prefix)
+            #         original_key = key
+            #         if original_key in _state_dict:
+            #             _state_dict[new_key] = _state_dict[original_key]
+
             state_dict = _state_dict
-            missing_keys, unexpected_keys = \
-                self.load_state_dict(state_dict, False)
+            missing_keys, unexpected_keys = self.load_state_dict(state_dict, False)
+            if missing_keys:
+                logger.warning(f"SwiftFormer_init_weight\nMissing keys: {missing_keys}")
+            if unexpected_keys:
+                logger.warning(f"SwiftFormer_init_weight\nUnexpected keys: {unexpected_keys}")
 
     def _init_weights(self, m):
         if isinstance(m, (nn.Conv2d, nn.Linear)):

@@ -6,11 +6,11 @@ import mmcv
 import numpy as np
 import torch
 from mmcv import Config
-from mmcv.parallel import MMDistributedDataParallel
-from mmcv.runner import load_checkpoint
+from mmcv.parallel import MMDistributedDataParallel, MMDataParallel
+from mmcv.runner import load_checkpoint, wrap_fp16_model
 from torchpack import distributed as dist
 from torchpack.utils.config import configs
-from torchpack.utils.tqdm import tqdm
+from tqdm import tqdm
 
 from mmdet3d.core import LiDARInstance3DBoxes
 from mmdet3d.core.utils import visualize_camera, visualize_lidar, visualize_map
@@ -36,7 +36,9 @@ def recursive_eval(obj, globals=None):
 
 
 def main() -> None:
-    dist.init()
+    # dist.init()
+
+    distributed = False
 
     parser = argparse.ArgumentParser()
     parser.add_argument("config", metavar="FILE")
@@ -61,22 +63,28 @@ def main() -> None:
     dataset = build_dataset(cfg.data[args.split])
     dataflow = build_dataloader(
         dataset,
-        samples_per_gpu=1,
+        samples_per_gpu=cfg.data.samples_per_gpu,
         workers_per_gpu=cfg.data.workers_per_gpu,
-        dist=True,
+        dist=distributed,
         shuffle=False,
     )
 
     # build the model and load checkpoint
     if args.mode == "pred":
         model = build_model(cfg.model)
+        fp16_cfg = cfg.get("fp16", None)
+        if fp16_cfg is not None:
+            wrap_fp16_model(model)
         load_checkpoint(model, args.checkpoint, map_location="cpu")
 
-        model = MMDistributedDataParallel(
-            model.cuda(),
-            device_ids=[torch.cuda.current_device()],
-            broadcast_buffers=False,
-        )
+        if not distributed:
+            model = MMDataParallel(model, device_ids=[0])
+        else:
+            model = MMDistributedDataParallel(
+                model.cuda(),
+                device_ids=[torch.cuda.current_device()],
+                broadcast_buffers=False,
+            )
         model.eval()
 
     for data in tqdm(dataflow):
