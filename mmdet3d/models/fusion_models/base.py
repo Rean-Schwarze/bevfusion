@@ -36,6 +36,7 @@ class Base3DFusionModel(BaseModule, metaclass=ABCMeta):
             else:
                 raise TypeError(f"{loss_name} is not a tensor or list of tensors")
 
+        # loss = loss_heatmap + layer_-1_loss_cls + layer_-1_loss_bbox
         loss = sum(_value for _key, _value in log_vars.items() if "loss" in _key)
 
         log_vars["loss"] = loss

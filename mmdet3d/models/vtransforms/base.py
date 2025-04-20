@@ -34,8 +34,8 @@ class BaseTransform(nn.Module):
         dbound: Tuple[float, float, float],
         use_points='lidar', 
         depth_input='scalar',
-        height_expand=True,
-        add_depth_features=True,
+        height_expand=False,
+        add_depth_features=False,
     ) -> None:
         super().__init__()
         self.in_channels = in_channels
@@ -321,7 +321,7 @@ class BaseDepthTransform(BaseTransform):
                     depth[b, c, 0, masked_coords[:, 0], masked_coords[:, 1]] = masked_dist
                 elif self.depth_input == 'one-hot':
                     # Clamp depths that are too big to D
-                    # These can arise when the point range filter is different from the dbound. 
+                    # These can arise when the point range filter is different from the dbound.
                     masked_dist = torch.clamp(masked_dist, max=self.D-1)
                     depth[b, c, masked_dist.long(), masked_coords[:, 0], masked_coords[:, 1]] = 1.0
 

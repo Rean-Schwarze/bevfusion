@@ -15,10 +15,10 @@ from torchvision.utils import save_image
 from mmdet3d.ops import feature_decorator
 from mmcv.cnn.bricks.non_local import NonLocal2d
 
-from flash_attn.flash_attention import FlashMHA
+# from flash_attn.flash_attention import FlashMHA
 
 
-__all__ = ["RadarFeatureNet", "RadarEncoder"]
+__all__ = ["RadarFeatureNet", "RadarEncoder", "RadarEncoderCalib", "RadarEncoderProj"]
 
 
 def get_paddings_indicator(actual_num, max_num, axis=0):
@@ -223,6 +223,149 @@ class RadarEncoder(nn.Module):
         nx, ny = 128, 128
         canvas = torch.zeros(
             nx*ny, dtype=sizes.dtype, device=sizes.device
+        )
+        indices = coords[:, 1] * ny + coords[:, 2]
+        indices = indices.type(torch.long)
+        canvas[indices] = sizes
+        torch.save(canvas, 'sample_canvas')
+
+
+@BACKBONES.register_module()
+class RadarEncoderCalib(nn.Module):
+    # add a learning-based calibration module for learning offset from the radar sensor
+
+    def __init__(
+            self,
+            pts_voxel_encoder: Dict[str, Any],
+            pts_middle_encoder: Dict[str, Any],
+            pts_transformer_encoder=None,
+            pts_bev_encoder=None,
+            post_scatter=None,
+            distill_caliber=False,
+            **kwargs,
+    ):
+        super().__init__()
+        self.pts_voxel_encoder = build_backbone(pts_voxel_encoder)
+        self.pts_middle_encoder = build_backbone(pts_middle_encoder)
+        self.pts_transformer_encoder = build_backbone(
+            pts_transformer_encoder) if pts_transformer_encoder is not None else None
+        self.pts_bev_encoder = build_backbone(pts_bev_encoder) if pts_bev_encoder is not None else None
+        self.post_scatter = build_backbone(post_scatter) if post_scatter is not None else None
+        self.distill_caliber = distill_caliber
+
+        if self.distill_caliber:
+            self.caliber = nn.Sequential(
+                nn.Conv2d(256, 256, 3, padding=2, dilation=2),
+                nn.BatchNorm2d(256),
+                nn.ReLU(),
+                nn.Conv2d(256, 256, 3, padding=2, dilation=2),
+                nn.BatchNorm2d(256),
+                nn.ReLU(),
+                nn.Conv2d(256, 256, 3, padding=2, dilation=2),
+                nn.BatchNorm2d(256),
+                nn.ReLU(), )
+            self.distill_activation_head = nn.Sequential(
+                nn.Conv2d(256, 1, 1, bias=False),
+                nn.ReLU())
+
+            # initialize the caliber
+            nn.init.kaiming_normal_(self.caliber[0].weight, mode='fan_out', nonlinearity='relu')
+            nn.init.constant_(self.caliber[0].bias, 0)
+            nn.init.constant_(self.caliber[1].weight, 1)
+            nn.init.constant_(self.caliber[1].bias, 0)
+            nn.init.kaiming_normal_(self.caliber[3].weight, mode='fan_out', nonlinearity='relu')
+            nn.init.constant_(self.caliber[3].bias, 0)
+            nn.init.constant_(self.caliber[4].weight, 1)
+            nn.init.constant_(self.caliber[4].bias, 0)
+            nn.init.kaiming_normal_(self.caliber[6].weight, mode='fan_out', nonlinearity='relu')
+            nn.init.constant_(self.caliber[6].bias, 0)
+            nn.init.constant_(self.caliber[7].weight, 1)
+            nn.init.constant_(self.caliber[7].bias, 0)
+            nn.init.kaiming_normal_(self.distill_activation_head[0].weight, mode='fan_out', nonlinearity='relu')
+
+    def forward(self, feats, coords, batch_size, sizes, img_features=None):
+        x = self.pts_voxel_encoder(feats, sizes, coords)
+
+        if self.pts_transformer_encoder is not None:
+            x = self.pts_transformer_encoder(x, sizes, coords, batch_size)
+
+        x = self.pts_middle_encoder(x, coords, batch_size)
+
+        if self.post_scatter is not None:
+            x = self.post_scatter(x, img_features)
+
+        if self.pts_bev_encoder is not None:
+            x = self.pts_bev_encoder(x)
+
+        if self.distill_caliber:
+            x = self.caliber(x)
+            x_activation = self.distill_activation_head(x)  # used for distillation
+            return x, x_activation
+        else:
+            return x
+
+    def visualize_pillars(self, feats, coords, sizes):
+        nx, ny = 128, 128
+        canvas = torch.zeros(
+            nx * ny, dtype=sizes.dtype, device=sizes.device
+        )
+        indices = coords[:, 1] * ny + coords[:, 2]
+        indices = indices.type(torch.long)
+        canvas[indices] = sizes
+        torch.save(canvas, 'sample_canvas')
+
+
+@BACKBONES.register_module()
+class RadarEncoderProj(nn.Module):
+    # add a learning-based calibration module for learning offset from the radar sensor
+
+    def __init__(
+            self,
+            pts_voxel_encoder: Dict[str, Any],
+            pts_middle_encoder: Dict[str, Any],
+            pts_transformer_encoder=None,
+            pts_bev_encoder=None,
+            post_scatter=None,
+            distill_caliber=False,
+            **kwargs,
+    ):
+        super().__init__()
+        self.pts_voxel_encoder = build_backbone(pts_voxel_encoder)
+        self.pts_middle_encoder = build_backbone(pts_middle_encoder)
+        self.pts_transformer_encoder = build_backbone(
+            pts_transformer_encoder) if pts_transformer_encoder is not None else None
+        self.pts_bev_encoder = build_backbone(pts_bev_encoder) if pts_bev_encoder is not None else None
+        self.post_scatter = build_backbone(post_scatter) if post_scatter is not None else None
+        self.distill_caliber = distill_caliber
+
+        self.distill_activation_head = nn.Sequential(
+            nn.Conv2d(256, 1, 1, bias=False),
+            nn.ReLU())
+
+        nn.init.kaiming_normal_(self.distill_activation_head[0].weight, mode='fan_out', nonlinearity='relu')
+
+    def forward(self, feats, coords, batch_size, sizes, img_features=None):
+        x = self.pts_voxel_encoder(feats, sizes, coords)
+
+        if self.pts_transformer_encoder is not None:
+            x = self.pts_transformer_encoder(x, sizes, coords, batch_size)
+
+        x = self.pts_middle_encoder(x, coords, batch_size)
+
+        if self.post_scatter is not None:
+            x = self.post_scatter(x, img_features)
+
+        if self.pts_bev_encoder is not None:
+            x = self.pts_bev_encoder(x)
+
+        x_activation = self.distill_activation_head(x)  # used for distillation
+
+        return x, x_activation
+
+    def visualize_pillars(self, feats, coords, sizes):
+        nx, ny = 128, 128
+        canvas = torch.zeros(
+            nx * ny, dtype=sizes.dtype, device=sizes.device
         )
         indices = coords[:, 1] * ny + coords[:, 2]
         indices = indices.type(torch.long)
