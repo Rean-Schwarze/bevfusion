@@ -6,12 +6,11 @@ from mmdet3d.models.utils.transformer import MultiheadAttention
 from typing import Union
 from thop import profile
 
-
 __all__ = ["flops_counter"]
 
 
-# TODO: no need to consider ShiftWindowMSA since it contains WindowMSA
-def count_window_msa(m: Union[WindowMSA, ShiftWindowMSA], x, y):
+# no need to consider ShiftWindowMSA since it contains WindowMSA
+def count_window_msa(m: Union[WindowMSA], x, y):
     if isinstance(m, WindowMSA):
         embed_dims = m.embed_dims
         num_heads = m.num_heads
@@ -36,7 +35,7 @@ def count_sparseconv(m: Union[SparseConv3d, SubMConv3d], x, y):
 
 
 def count_mha(m: Union[MultiheadAttention, nn.MultiheadAttention], x, y):
-    flops = 0 
+    flops = 0
     if len(x) == 3:
         q, k, v = x
     elif len(x) == 2:
@@ -82,9 +81,9 @@ def count_mha(m: Union[MultiheadAttention, nn.MultiheadAttention], x, y):
 
     # Initial projections
     flops += (
-        (qlen * qdim * qdim)  # QW
-        + (klen * kdim * kdim)  # KW
-        + (vlen * vdim * vdim)  # VW
+            (qlen * qdim * qdim)  # QW
+            + (klen * kdim * kdim)  # KW
+            + (vlen * vdim * vdim)  # VW
     )
 
     if m.in_proj_bias is not None:
@@ -95,9 +94,9 @@ def count_mha(m: Union[MultiheadAttention, nn.MultiheadAttention], x, y):
     v_head_dim = vdim // num_heads
 
     head_flops = (
-        (qlen * klen * qk_head_dim)  # QK^T
-        + (qlen * klen)  # softmax
-        + (qlen * klen * v_head_dim)  # AV
+            (qlen * klen * qk_head_dim)  # QK^T
+            + (qlen * klen)  # softmax
+            + (qlen * klen * v_head_dim)  # AV
     )
 
     flops += num_heads * head_flops
@@ -111,11 +110,10 @@ def count_mha(m: Union[MultiheadAttention, nn.MultiheadAttention], x, y):
 
 def flops_counter(model, inputs):
     macs, params = profile(
-        model, 
-        inputs, 
+        model,
+        inputs=inputs,
         custom_ops={
             WindowMSA: count_window_msa,
-            #ShiftWindowMSA: count_window_msa,
             SparseConv3d: count_sparseconv,
             SubMConv3d: count_sparseconv,
             MultiheadAttention: count_mha
