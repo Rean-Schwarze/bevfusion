@@ -56,11 +56,11 @@ class DepthLSSTransform(BaseDepthTransform):
             nn.BatchNorm2d(64),
             nn.ReLU(True),
         )
-        self.xtransform = nn.Sequential(  # change for SwiftFormer, input[6, 256, 64, 176]
-            nn.Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(True),
-        )
+        # self.xtransform = nn.Sequential(  # change for SwiftFormer, input[6, 256, 64, 176]
+        #     nn.Conv2d(256, 256, kernel_size=3, stride=2, padding=1),
+        #     nn.BatchNorm2d(256),
+        #     nn.ReLU(True),
+        # )
         self.depthnet = nn.Sequential(
             nn.Conv2d(in_channels + 64, in_channels, 3, padding=1),
             nn.BatchNorm2d(in_channels),
@@ -94,7 +94,7 @@ class DepthLSSTransform(BaseDepthTransform):
             self.downsample = nn.Identity()
 
     @force_fp32()
-    def get_cam_feats(self, x, d):
+    def get_cam_feats(self, x, d, **kwargs):
         """
         x：图像特征
         d：激光点云在图像物理坐标系下的深度信息。

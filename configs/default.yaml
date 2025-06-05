@@ -12,6 +12,9 @@ log_config:
       type: TextLoggerHook
     -
       type: TensorboardLoggerHook
+    -
+      type: WandbLoggerHook
+      init_kwargs: { 'project': 'BEVFusion-Lite', 'name': 'rean' }
 
 load_from: null
 resume_from: null

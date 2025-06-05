@@ -52,7 +52,8 @@ class _Voxelization(Function):
             voxels = points.new_zeros(size=(max_voxels, max_points, points.size(1)))
             coors = points.new_zeros(size=(max_voxels, 3), dtype=torch.int)
             num_points_per_voxel = points.new_zeros(size=(max_voxels,), dtype=torch.int)
-            voxel_num = hard_voxelize(
+            # print("before hard_voxelize")
+            voxel_num = hard_voxelize(  # in .so
                 points,
                 voxels,
                 coors,
@@ -64,6 +65,7 @@ class _Voxelization(Function):
                 3,
                 deterministic,
             )
+            # print("after hard_voxelize")
             # select the valid voxels
             voxels_out = voxels[:voxel_num]
             coors_out = coors[:voxel_num]

@@ -36,37 +36,41 @@ def clip_sigmoid(x, eps=1e-4):
 @HEADS.register_module()
 class TransFusionHead(nn.Module):
     def __init__(
-        self,
-        num_proposals=128,
-        auxiliary=True,
-        in_channels=128 * 3,
-        hidden_channel=128,
-        num_classes=4,
-        # config for Transformer
-        num_decoder_layers=3,
-        num_heads=8,
-        nms_kernel_size=1,
-        ffn_channel=256,
-        dropout=0.1,
-        bn_momentum=0.1,
-        activation="relu",
-        # config for FFN
-        common_heads=dict(),
-        num_heatmap_convs=2,
-        conv_cfg=dict(type="Conv1d"),
-        norm_cfg=dict(type="BN1d"),
-        bias="auto",
-        # loss
-        loss_cls=dict(type="GaussianFocalLoss", reduction="mean"),
-        loss_iou=dict(
-            type="VarifocalLoss", use_sigmoid=True, iou_weighted=True, reduction="mean"
-        ),
-        loss_bbox=dict(type="L1Loss", reduction="mean"),
-        loss_heatmap=dict(type="GaussianFocalLoss", reduction="mean"),
-        # others
-        train_cfg=None,
-        test_cfg=None,
-        bbox_coder=None,
+            self,
+            num_proposals=128,
+            auxiliary=True,
+            in_channels=128 * 3,
+            hidden_channel=128,
+            num_classes=4,
+            # config for Transformer
+            num_decoder_layers=3,
+            num_heads=8,
+            nms_kernel_size=1,
+            ffn_channel=256,
+            dropout=0.1,
+            bn_momentum=0.1,
+            activation="relu",
+            # config for FFN
+            common_heads=dict(),
+            num_heatmap_convs=2,
+            conv_cfg=dict(type="Conv1d"),
+            norm_cfg=dict(type="BN1d"),
+            bias="auto",
+            # loss
+            loss_cls=dict(type="GaussianFocalLoss", reduction="mean"),
+            loss_iou=dict(
+                type="VarifocalLoss", use_sigmoid=True, iou_weighted=True, reduction="mean"
+            ),
+            loss_bbox=dict(type="L1Loss", reduction="mean"),
+            loss_heatmap=dict(type="GaussianFocalLoss", reduction="mean"),
+            loss_cls_soft=dict(type="Quality_Focal_Loss", beta=2.0),
+            loss_bbox_soft=dict(type="SmoothL1Loss", beta=1.0, reduction="none", loss_weight=1.0),  # SmoothL1 Loss
+            loss_soft_task_weights=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            tasks=None,
+            # others
+            train_cfg=None,
+            test_cfg=None,
+            bbox_coder=None,
     ):
         super(TransFusionHead, self).__init__()
 
@@ -90,6 +94,14 @@ class TransFusionHead(nn.Module):
         self.loss_bbox = build_loss(loss_bbox)
         self.loss_iou = build_loss(loss_iou)
         self.loss_heatmap = build_loss(loss_heatmap)
+
+        # Build loss for soft label
+        if loss_cls_soft is not None:
+            self.loss_cls_soft = build_loss(loss_cls_soft)
+        if loss_bbox_soft is not None:
+            self.loss_bbox_soft = build_loss(loss_bbox_soft)
+        if loss_soft_task_weights is not None:
+            self.loss_soft_task_weights = loss_soft_task_weights
 
         self.bbox_coder = build_bbox_coder(bbox_coder)
         self.sampling = False
@@ -247,29 +259,29 @@ class TransFusionHead(nn.Module):
         ## for Pedestrian & Traffic_cone in nuScenes
         if self.test_cfg["dataset"] == "nuScenes":
             local_max[
-                :,
-                8,
+            :,
+            8,
             ] = F.max_pool2d(heatmap[:, 8], kernel_size=1, stride=1, padding=0)
             local_max[
-                :,
-                9,
+            :,
+            9,
             ] = F.max_pool2d(heatmap[:, 9], kernel_size=1, stride=1, padding=0)
         elif self.test_cfg["dataset"] == "Waymo":  # for Pedestrian & Cyclist in Waymo
             local_max[
-                :,
-                1,
+            :,
+            1,
             ] = F.max_pool2d(heatmap[:, 1], kernel_size=1, stride=1, padding=0)
             local_max[
-                :,
-                2,
+            :,
+            2,
             ] = F.max_pool2d(heatmap[:, 2], kernel_size=1, stride=1, padding=0)
         heatmap = heatmap * (heatmap == local_max)
         heatmap = heatmap.view(batch_size, heatmap.shape[1], -1)
 
         # top #num_proposals among all classes
         top_proposals = heatmap.view(batch_size, -1).argsort(dim=-1, descending=True)[
-            ..., : self.num_proposals
-        ]
+                        ..., : self.num_proposals
+                        ]
         top_proposals_class = top_proposals // heatmap.shape[-1]
         top_proposals_index = top_proposals % heatmap.shape[-1]
         query_feat = lidar_feat_flatten.gather(
@@ -374,7 +386,7 @@ class TransFusionHead(nn.Module):
         for batch_idx in range(len(gt_bboxes_3d)):
             pred_dict = {}
             for key in preds_dict[0].keys():
-                pred_dict[key] = preds_dict[0][key][batch_idx : batch_idx + 1]
+                pred_dict[key] = preds_dict[0][key][batch_idx: batch_idx + 1]
             list_of_pred_dict.append(pred_dict)
 
         assert len(gt_bboxes_3d) == len(list_of_pred_dict)
@@ -448,12 +460,12 @@ class TransFusionHead(nn.Module):
         assign_result_list = []
         for idx_layer in range(num_layer):
             bboxes_tensor_layer = bboxes_tensor[
-                self.num_proposals * idx_layer : self.num_proposals * (idx_layer + 1), :
-            ]
+                                  self.num_proposals * idx_layer: self.num_proposals * (idx_layer + 1), :
+                                  ]
             score_layer = score[
-                ...,
-                self.num_proposals * idx_layer : self.num_proposals * (idx_layer + 1),
-            ]
+                          ...,
+                          self.num_proposals * idx_layer: self.num_proposals * (idx_layer + 1),
+                          ]
 
             if self.train_cfg.assigner.type == "HungarianAssigner3D":
                 assign_result = self.bbox_assigner.assign(
@@ -532,7 +544,7 @@ class TransFusionHead(nn.Module):
         pc_range = torch.tensor(self.train_cfg["point_cloud_range"])
         voxel_size = torch.tensor(self.train_cfg["voxel_size"])
         feature_map_size = (
-            grid_size[:2] // self.train_cfg["out_size_factor"]
+                grid_size[:2] // self.train_cfg["out_size_factor"]
         )  # [x_len, y_len]
         heatmap = gt_bboxes_3d.new_zeros(
             self.num_classes, feature_map_size[1], feature_map_size[0]
@@ -550,14 +562,14 @@ class TransFusionHead(nn.Module):
                 x, y = gt_bboxes_3d[idx][0], gt_bboxes_3d[idx][1]
 
                 coor_x = (
-                    (x - pc_range[0])
-                    / voxel_size[0]
-                    / self.train_cfg["out_size_factor"]
+                        (x - pc_range[0])
+                        / voxel_size[0]
+                        / self.train_cfg["out_size_factor"]
                 )
                 coor_y = (
-                    (y - pc_range[1])
-                    / voxel_size[1]
-                    / self.train_cfg["out_size_factor"]
+                        (y - pc_range[1])
+                        / voxel_size[1]
+                        / self.train_cfg["out_size_factor"]
                 )
 
                 center = torch.tensor(
@@ -623,24 +635,24 @@ class TransFusionHead(nn.Module):
         # compute loss for each layer
         for idx_layer in range(self.num_decoder_layers if self.auxiliary else 1):
             if idx_layer == self.num_decoder_layers - 1 or (
-                idx_layer == 0 and self.auxiliary is False
+                    idx_layer == 0 and self.auxiliary is False
             ):
                 prefix = "layer_-1"
             else:
                 prefix = f"layer_{idx_layer}"
 
             layer_labels = labels[
-                ...,
-                idx_layer * self.num_proposals : (idx_layer + 1) * self.num_proposals,
-            ].reshape(-1)
+                           ...,
+                           idx_layer * self.num_proposals: (idx_layer + 1) * self.num_proposals,
+                           ].reshape(-1)
             layer_label_weights = label_weights[
-                ...,
-                idx_layer * self.num_proposals : (idx_layer + 1) * self.num_proposals,
-            ].reshape(-1)
+                                  ...,
+                                  idx_layer * self.num_proposals: (idx_layer + 1) * self.num_proposals,
+                                  ].reshape(-1)
             layer_score = preds_dict["heatmap"][
-                ...,
-                idx_layer * self.num_proposals : (idx_layer + 1) * self.num_proposals,
-            ]
+                          ...,
+                          idx_layer * self.num_proposals: (idx_layer + 1) * self.num_proposals,
+                          ]
             layer_cls_score = layer_score.permute(0, 2, 1).reshape(-1, self.num_classes)
             layer_loss_cls = self.loss_cls(
                 layer_cls_score,
@@ -650,21 +662,21 @@ class TransFusionHead(nn.Module):
             )
 
             layer_center = preds_dict["center"][
-                ...,
-                idx_layer * self.num_proposals : (idx_layer + 1) * self.num_proposals,
-            ]
+                           ...,
+                           idx_layer * self.num_proposals: (idx_layer + 1) * self.num_proposals,
+                           ]
             layer_height = preds_dict["height"][
-                ...,
-                idx_layer * self.num_proposals : (idx_layer + 1) * self.num_proposals,
-            ]
+                           ...,
+                           idx_layer * self.num_proposals: (idx_layer + 1) * self.num_proposals,
+                           ]
             layer_rot = preds_dict["rot"][
-                ...,
-                idx_layer * self.num_proposals : (idx_layer + 1) * self.num_proposals,
-            ]
+                        ...,
+                        idx_layer * self.num_proposals: (idx_layer + 1) * self.num_proposals,
+                        ]
             layer_dim = preds_dict["dim"][
-                ...,
-                idx_layer * self.num_proposals : (idx_layer + 1) * self.num_proposals,
-            ]
+                        ...,
+                        idx_layer * self.num_proposals: (idx_layer + 1) * self.num_proposals,
+                        ]
             preds = torch.cat(
                 [layer_center, layer_height, layer_dim, layer_rot], dim=1
             ).permute(
@@ -672,11 +684,11 @@ class TransFusionHead(nn.Module):
             )  # [BS, num_proposals, code_size]
             if "vel" in preds_dict.keys():
                 layer_vel = preds_dict["vel"][
-                    ...,
-                    idx_layer
-                    * self.num_proposals : (idx_layer + 1)
-                    * self.num_proposals,
-                ]
+                            ...,
+                            idx_layer
+                            * self.num_proposals: (idx_layer + 1)
+                                                  * self.num_proposals,
+                            ]
                 preds = torch.cat(
                     [layer_center, layer_height, layer_dim, layer_rot, layer_vel], dim=1
                 ).permute(
@@ -684,18 +696,18 @@ class TransFusionHead(nn.Module):
                 )  # [BS, num_proposals, code_size]
             code_weights = self.train_cfg.get("code_weights", None)
             layer_bbox_weights = bbox_weights[
-                :,
-                idx_layer * self.num_proposals : (idx_layer + 1) * self.num_proposals,
-                :,
-            ]
+                                 :,
+                                 idx_layer * self.num_proposals: (idx_layer + 1) * self.num_proposals,
+                                 :,
+                                 ]
             layer_reg_weights = layer_bbox_weights * layer_bbox_weights.new_tensor(
                 code_weights
             )
             layer_bbox_targets = bbox_targets[
-                :,
-                idx_layer * self.num_proposals : (idx_layer + 1) * self.num_proposals,
-                :,
-            ]
+                                 :,
+                                 idx_layer * self.num_proposals: (idx_layer + 1) * self.num_proposals,
+                                 :,
+                                 ]
             layer_loss_bbox = self.loss_bbox(
                 preds, layer_bbox_targets, layer_reg_weights, avg_factor=max(num_pos, 1)
             )
@@ -712,6 +724,172 @@ class TransFusionHead(nn.Module):
 
         return loss_dict
 
+    @force_fp32(apply_to=("preds_dicts"))
+    def loss_soft(self, target_dicts, preds_dicts, loss_teacher, loss_student, **kwargs):
+        """Loss function for TransFusion.
+        Args:
+            target_dicts (tuple(list(dict))): Output of teacher forward function
+            preds_dicts (tuple(list(dict))): Output of student forward function.
+                dict_keys(['center', 'height', 'dim', 'rot', 'vel', 'heatmap', 'query_heatmap_score', 'dense_heatmap'])
+            loss_teacher (dict): Output of teacher loss function.
+            loss_student (dict): Output of student loss function.
+        Returns:
+            dict[str:torch.Tensor]: Loss of heatmap and bbox of each task.
+        """
+        loss_dict = dict()
+
+        for task_id, preds_dict in enumerate(preds_dicts):
+            """
+            cls soft loss
+            """
+            # For centerhead
+            target_dicts[task_id][0]["heatmap"] = clip_sigmoid(target_dicts[task_id][0]["heatmap"]).to(torch.float32)
+            preds_dict[0]["heatmap"] = clip_sigmoid(preds_dict[0]["heatmap"])
+
+            pos = (target_dicts[task_id][0]["heatmap"] > 0.3).float().sum()
+            loss_heatmap_soft = self.loss_cls_soft(preds_dict[0]["heatmap"],
+                                                   target_dicts[task_id][0]["heatmap"],
+                                                   pos).sum()
+
+            """
+            bbox soft loss
+            """
+            # reconstruct the anno_box from multiple reg heads
+            # target_dicts[task_id][0]["anno_box"] = torch.cat(
+            #     (
+            #         target_dicts[task_id][0]["center"],
+            #         target_dicts[task_id][0]["height"],
+            #         target_dicts[task_id][0]["dim"],
+            #         target_dicts[task_id][0]["rot"],
+            #         target_dicts[task_id][0]["vel"],
+            #     ),
+            #     dim=1,
+            # )
+            # preds_dict[0]["anno_box"] = torch.cat(
+            #     (
+            #         preds_dict[0]["center"],
+            #         preds_dict[0]["height"],
+            #         preds_dict[0]["dim"],
+            #         preds_dict[0]["rot"],
+            #         preds_dict[0]["vel"],
+            #     ),
+            #     dim=1,
+            # )
+            #
+            # # Regression loss for dimension, offset, height, rotation
+            # threshold = 0.1
+            # mask = torch.repeat_interleave((target_dicts[task_id][0]["heatmap"].sum(1, keepdim=True) > threshold),
+            #                                repeats=preds_dict[0]["anno_box"].shape[1], dim=1)
+            # num = mask.float().sum()
+            # while num <= 0:
+            #     # threshold *= 0.5
+            #     threshold -= 0.01
+            #     mask = torch.repeat_interleave((target_dicts[task_id][0]["heatmap"].sum(1, keepdim=True) > threshold),
+            #                                    repeats=preds_dict[0]["anno_box"].shape[1], dim=1)
+            #     num = mask.float().sum()
+            #
+            # loss_bbox_soft = self.loss_bbox_soft(preds_dict[0]["anno_box"], target_dicts[task_id][0]["anno_box"])
+            # loss_bbox_soft = (loss_bbox_soft * target_dicts[task_id][0]["heatmap"] *
+            #                   preds_dict[0]["anno_box"].shape[1])[mask].mean() * 4
+            loss_bbox_soft = self.loss_bbox_soft(loss_student["layer_-1_loss_bbox"], loss_teacher["layer_-1_loss_bbox"])
+
+            """
+            loss dict
+            """
+            loss_dict[f"heatmap/task{task_id}/kd"] = loss_heatmap_soft * self.loss_soft_task_weights[int(task_id)]
+            loss_dict[f"bbox/task{task_id}/kd"] = loss_bbox_soft * self.loss_soft_task_weights[int(task_id)]
+        return loss_dict
+
+    def cat_pred_dict(self, pred_dict):
+        pred = None
+        for idx_layer in range(self.num_decoder_layers if self.auxiliary else 1):
+            if idx_layer == self.num_decoder_layers - 1 or (
+                    idx_layer == 0 and self.auxiliary is False
+            ):
+                prefix = "layer_-1"
+            else:
+                prefix = f"layer_{idx_layer}"
+
+            layer_center = pred_dict["center"][
+                           ...,
+                           idx_layer * self.num_proposals: (idx_layer + 1) * self.num_proposals,
+                           ]
+            layer_height = pred_dict["height"][
+                           ...,
+                           idx_layer * self.num_proposals: (idx_layer + 1) * self.num_proposals,
+                           ]
+            layer_rot = pred_dict["rot"][
+                        ...,
+                        idx_layer * self.num_proposals: (idx_layer + 1) * self.num_proposals,
+                        ]
+            layer_dim = pred_dict["dim"][
+                        ...,
+                        idx_layer * self.num_proposals: (idx_layer + 1) * self.num_proposals,
+                        ]
+            if "vel" in pred_dict.keys():
+                layer_vel = pred_dict["vel"][
+                            ...,
+                            idx_layer
+                            * self.num_proposals: (idx_layer + 1)
+                                                  * self.num_proposals,
+                            ]
+                pred = torch.cat(
+                    [layer_center, layer_height, layer_dim, layer_rot, layer_vel], dim=1
+                ).permute(
+                    0, 2, 1
+                )  # [BS, num_proposals, code_size]
+            else:
+                pred = torch.cat(
+                    [layer_center, layer_height, layer_dim, layer_rot], dim=1
+                ).permute(
+                    0, 2, 1
+                )  # [BS, num_proposals, code_size]
+        return pred
+
+    def get_gt_masks(self, gt_bboxes_3d):
+        """
+        Generating groundtruth masks in BEV.
+        Args:
+            gt_bboxes_3d (list[:obj:`LiDARInstance3DBoxes`]): Ground
+                truth gt boxes.
+        Returns:
+            gt_masks: list of torch.Tensor: B of (N, 4).
+            B: batchsize. N: num of objects. 4: left_top_x, left_top_y, right_bottom_x, right_bottom_y
+        """
+        gt_masks = []
+        for batch in range(len(gt_bboxes_3d)):
+            gt_masks.append(self.get_gt_masks_single(gt_bboxes_3d[batch]))
+
+        return gt_masks
+
+    def get_gt_masks_single(self, gt_bboxes_3d):
+        """
+        Generating groundtruth masks for a single sample.
+        Args:
+            gt_bboxes_3d (list[:obj:`LiDARInstance3DBoxes`]): Ground
+                truth gt boxes.
+        Returns:
+            gt_masks: torch.Tensor: (N, 4).
+            N: num of objects. 4: left_top_x, left_top_y, right_bottom_x, right_bottom_y
+                                    x1, y0, x0, y1
+        """
+        device = gt_bboxes_3d.device
+        pc_range = torch.tensor(self.train_cfg["point_cloud_range"], dtype=torch.float32, device=device)
+        voxel_size = torch.tensor(self.train_cfg["voxel_size"], dtype=torch.float32, device=device)
+        out_size_factor = torch.tensor(self.train_cfg["out_size_factor"], device=device)
+
+        gt_boxes_3d_corners = gt_bboxes_3d.corners  # (N, 8, 3)
+        gt_boxes_3d_bev = torch.zeros((gt_boxes_3d_corners.shape[0], 4))
+
+        gt_boxes_3d_bev[:, 0] = ((gt_boxes_3d_corners[:, 4, 0] - pc_range[0]) / voxel_size[0]) / out_size_factor
+        gt_boxes_3d_bev[:, 1] = ((gt_boxes_3d_corners[:, 0, 1] - pc_range[1]) / voxel_size[1]) / out_size_factor
+        gt_boxes_3d_bev[:, 2] = ((gt_boxes_3d_corners[:, 0, 0] - pc_range[0]) / voxel_size[0]) / out_size_factor
+        gt_boxes_3d_bev[:, 3] = ((gt_boxes_3d_corners[:, 2, 1] - pc_range[1]) / voxel_size[1]) / out_size_factor
+
+        gt_boxes_3d_bev_int = gt_boxes_3d_bev.to(torch.int32)
+
+        return gt_boxes_3d_bev_int
+
     def get_bboxes(self, preds_dicts, metas, img=None, rescale=False, for_roi=False):
         """Generate bboxes from bbox head predictions.
         Args:
@@ -722,7 +900,7 @@ class TransFusionHead(nn.Module):
         rets = []
         for layer_id, preds_dict in enumerate(preds_dicts):
             batch_size = preds_dict[0]["heatmap"].shape[0]
-            batch_score = preds_dict[0]["heatmap"][..., -self.num_proposals :].sigmoid()
+            batch_score = preds_dict[0]["heatmap"][..., -self.num_proposals:].sigmoid()
             # if self.loss_iou.loss_weight != 0:
             #    batch_score = torch.sqrt(batch_score * preds_dict[0]['iou'][..., -self.num_proposals:].sigmoid())
             one_hot = F.one_hot(
@@ -730,13 +908,13 @@ class TransFusionHead(nn.Module):
             ).permute(0, 2, 1)
             batch_score = batch_score * preds_dict[0]["query_heatmap_score"] * one_hot
 
-            batch_center = preds_dict[0]["center"][..., -self.num_proposals :]
-            batch_height = preds_dict[0]["height"][..., -self.num_proposals :]
-            batch_dim = preds_dict[0]["dim"][..., -self.num_proposals :]
-            batch_rot = preds_dict[0]["rot"][..., -self.num_proposals :]
+            batch_center = preds_dict[0]["center"][..., -self.num_proposals:]
+            batch_height = preds_dict[0]["height"][..., -self.num_proposals:]
+            batch_dim = preds_dict[0]["dim"][..., -self.num_proposals:]
+            batch_rot = preds_dict[0]["rot"][..., -self.num_proposals:]
             batch_vel = None
             if "vel" in preds_dict[0]:
-                batch_vel = preds_dict[0]["vel"][..., -self.num_proposals :]
+                batch_vel = preds_dict[0]["vel"][..., -self.num_proposals:]
 
             temp = self.bbox_coder.decode(
                 batch_score,
@@ -838,7 +1016,15 @@ class TransFusionHead(nn.Module):
                 ret_layer.append(ret)
             rets.append(ret_layer)
         assert len(rets) == 1
-        assert len(rets[0]) == 1
+        # for idx, sub_rets in enumerate(rets):
+        #     print(f"rets[{idx}] 的长度: {len(sub_rets)}")
+        #     for i, result in enumerate(sub_rets):
+        #         print(f"rets[{idx}][{i}] 的键: {list(result.keys())}")
+        #         for key in ['bboxes', 'scores', 'labels']:
+        #             if key in result:
+        #                 print(f"rets[{idx}][{i}]['{key}'] 的形状: {result[key].shape}")
+        #         print()
+        # assert len(rets[0]) == 1
         res = [
             [
                 metas[0]["box_type_3d"](

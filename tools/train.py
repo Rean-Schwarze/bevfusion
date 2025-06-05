@@ -7,7 +7,7 @@ import time
 import numpy as np
 import torch
 from mmcv import Config
-from mmcv.runner import init_dist, get_dist_info, wrap_fp16_model
+from mmcv.runner import init_dist, get_dist_info, wrap_fp16_model, _load_checkpoint
 from torchpack.environ import auto_set_run_dir, set_run_dir
 from torchpack.utils.config import configs
 
@@ -15,10 +15,11 @@ from mmdet3d.apis import train_model
 from mmdet3d.datasets import build_dataset
 from mmdet3d.models import build_model
 from mmdet3d.utils import get_root_logger, convert_sync_batchnorm, recursive_eval
+from ultralytics import YOLO
 
 
 def main():
-#     dist.init()
+    #     dist.init()
 
     parser = argparse.ArgumentParser()
     parser.add_argument("config", metavar="FILE", help="config file")
@@ -42,11 +43,10 @@ def main():
         init_dist(args.launcher, **cfg.dist_params)
         local_rank = torch.distributed.get_rank()
         torch.cuda.set_device(local_rank)
-        device=torch.device("cuda",local_rank)
+        device = torch.device("cuda", local_rank)
         # re-set gpu_ids with distributed training mode
         _, world_size = get_dist_info()
         cfg.gpu_ids = range(world_size)
-        
 
     # init the logger before other steps
     timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
@@ -54,7 +54,8 @@ def main():
     logger = get_root_logger(log_file=log_file)
 
     # log some basic info
-    logger.info(f"GPU {torch.cuda.current_device()} of {torch.cuda.device_count()}: {torch.cuda.get_device_name(torch.cuda.current_device())}")
+    logger.info(
+        f"GPU {torch.cuda.current_device()} of {torch.cuda.device_count()}: {torch.cuda.get_device_name(torch.cuda.current_device())}")
     logger.info(f"device_capability: {torch.cuda.get_device_capability()}")
     # logger.info(f"Config:\n{cfg.pretty_text}")
 
@@ -74,6 +75,10 @@ def main():
     datasets = [build_dataset(cfg.data.train)]
 
     model = build_model(cfg.model)
+    # if "yolo_v11" in cfg.model.encoders.camera.backbone.type:
+    #     ckpt_path = "./pretrained/yolo11m.pt"
+    #     yolo_model = YOLO(ckpt_path)
+    #     model.encoders.camera.backbone = yolo_model
     fp16_cfg = cfg.get("fp16", None)
     if fp16_cfg is not None:
         wrap_fp16_model(model)
@@ -93,6 +98,13 @@ def main():
         validate=True,
         timestamp=timestamp,
     )
+#     x = torch.randn(4, 3, 256, 704).cuda()
+#     y = model.encoders.camera.backbone(x)
+#     print(f"type(y): {type(y)}")
+#     print(f"len(y): {len(y)}")
+#     for i in y:
+#         print(f"type(i): {type(i)}")
+#         print(i.shape)
 
 
 def load_config(args, opts, is_teacher):
@@ -115,6 +127,7 @@ def load_config(args, opts, is_teacher):
     # dump config
     cfg.dump(os.path.join(cfg.run_dir, dump_name))
     return cfg
+
 
 if __name__ == "__main__":
     main()

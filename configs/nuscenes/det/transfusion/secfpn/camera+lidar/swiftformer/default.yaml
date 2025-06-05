@@ -18,7 +18,7 @@ model:
         pretrained: True
         init_cfg:
           type: Pretrained
-          checkpoint: https://drive.google.com/file/d/1SDzauVmpR5uExkOv3ajxdwFnP-Buj9Uo/view?usp=sharing
+          checkpoint: http://rean-song-bucket.oss-cn-guangzhou.aliyuncs.com/autoDL/BEVFusion/ckpts/SwiftFormer_L1.pth
         vit_num: 1
         distillation: False
       neck:
@@ -26,6 +26,9 @@ model:
       vtransform:
         xbound: [-54.0, 54.0, 0.3]
         ybound: [-54.0, 54.0, 0.3]
+        height_expand: True
+        add_depth_features: True
+        is_xtransform: false
     lidar:
       voxelize:
         point_cloud_range: ${point_cloud_range}
@@ -47,3 +50,14 @@ lr_config:
   warmup_iters: 500
   warmup_ratio: 0.33333333
   min_lr_ratio: 1.0e-3
+
+log_config:
+  interval: 50
+  hooks:
+    -
+      type: TextLoggerHook
+    -
+      type: TensorboardLoggerHook
+    -
+      type: WandbLoggerHook
+      init_kwargs: {'project': 'BEVFusion-Lite', 'name': 'fin_swift'}

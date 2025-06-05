@@ -12,11 +12,16 @@ from mmcv.runner import get_dist_info, init_dist, load_checkpoint, wrap_fp16_mod
 from mmdet3d.apis import single_gpu_test
 from mmdet3d.datasets import build_dataloader, build_dataset
 from mmdet3d.models import build_model
+from mmdet3d.utils import recursive_eval
 from mmdet.apis import multi_gpu_test, set_random_seed
 from mmdet.datasets import replace_ImageToTensor
+from torchpack.utils.config import configs
 from onnxsim import simplify
 from tqdm import tqdm
 
+#
+# 并不能使用，请使用：https://github.com/NVIDIA-AI-IOT/Lidar_AI_Solution/tree/master/CUDA-BEVFusion
+#
 
 def parse_args():
     parser = argparse.ArgumentParser(description="MMDet test (and eval) a model")
@@ -27,11 +32,11 @@ def parse_args():
         nargs="+",
         action=DictAction,
         help="override some settings in the used config, the key-value pair "
-        "in xxx=yyy format will be merged into config file. If the value to "
-        'be overwritten is a list, it should be like key="[a,b]" or key=a,b '
-        'It also allows nested list/tuple values, e.g. key="[(a,b),(c,d)]" '
-        "Note that the quotation marks are necessary and that no white space "
-        "is allowed.",
+             "in xxx=yyy format will be merged into config file. If the value to "
+             'be overwritten is a list, it should be like key="[a,b]" or key=a,b '
+             'It also allows nested list/tuple values, e.g. key="[(a,b),(c,d)]" '
+             "Note that the quotation marks are necessary and that no white space "
+             "is allowed.",
     )
     args = parser.parse_args()
     return args
@@ -40,7 +45,8 @@ def parse_args():
 def main():
     args = parse_args()
 
-    cfg = Config.fromfile(args.config)
+    configs.load(args.config, recursive=True)
+    cfg = Config(recursive_eval(configs), filename=args.config)
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
 
@@ -58,7 +64,7 @@ def main():
     dataset = build_dataset(cfg.data.test)
     data_loader = build_dataloader(
         dataset,
-        samples_per_gpu=1,
+        samples_per_gpu=cfg.data.samples_per_gpu,
         workers_per_gpu=cfg.data.workers_per_gpu,
         dist=False,
         shuffle=False,
@@ -78,10 +84,10 @@ def main():
 
     model.eval()
 
-    with torch.no_grad():
+    with (torch.no_grad()):
         for data in data_loader:
-            img = [torch.cat([data["img"][0].data[0]] * 6, dim=0)]
-            metas = data["metas"][0].data
+            img = [torch.cat([data["img"].data[0]] * 6, dim=0)]
+            metas = data["metas"].data
 
             from functools import partial
 

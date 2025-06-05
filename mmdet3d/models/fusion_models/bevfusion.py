@@ -15,7 +15,6 @@ from mmdet3d.models.builder import (
 from mmdet3d.ops import Voxelization, DynamicScatter
 from mmdet3d.models import FUSIONMODELS
 
-
 from .base import Base3DFusionModel
 
 __all__ = ["BEVFusion"]
@@ -24,108 +23,121 @@ __all__ = ["BEVFusion"]
 @FUSIONMODELS.register_module()
 class BEVFusion(Base3DFusionModel):
     def __init__(
-        self,
-        encoders: Dict[str, Any],
-        fuser: Dict[str, Any],
-        decoder: Dict[str, Any],
-        heads: Dict[str, Any],
-        **kwargs,
+            self,
+            encoders: Dict[str, Any],
+            fuser: Dict[str, Any],
+            decoder: Dict[str, Any],
+            heads: Dict[str, Any],
+            **kwargs,
     ) -> None:
         super().__init__()
 
-        self.encoders = nn.ModuleDict()
-        if encoders.get("camera") is not None:
-            self.encoders["camera"] = nn.ModuleDict(
-                {
-                    "backbone": build_backbone(encoders["camera"]["backbone"]),
-                    "neck": build_neck(encoders["camera"]["neck"]),
-                    "vtransform": build_vtransform(encoders["camera"]["vtransform"]),
-                }
-            )
-        if encoders.get("lidar") is not None:
-            if encoders["lidar"]["voxelize"].get("max_num_points", -1) > 0:
-                voxelize_module = Voxelization(**encoders["lidar"]["voxelize"])
-            else:
-                voxelize_module = DynamicScatter(**encoders["lidar"]["voxelize"])
-            self.encoders["lidar"] = nn.ModuleDict(
-                {
-                    "voxelize": voxelize_module,
-                    "backbone": build_backbone(encoders["lidar"]["backbone"]),
-                }
-            )
-            self.voxelize_reduce = encoders["lidar"].get("voxelize_reduce", True)
+        if encoders is not None:
+            self.encoders = nn.ModuleDict()
+            if encoders.get("camera") is not None:
+                self.encoders["camera"] = nn.ModuleDict(
+                    {
+                        "backbone": build_backbone(encoders["camera"]["backbone"]),
+                        "neck": build_neck(encoders["camera"]["neck"]),
+                        "vtransform": build_vtransform(encoders["camera"]["vtransform"]),
+                    }
+                )
+            if encoders.get("lidar") is not None:
+                if encoders["lidar"]["voxelize"].get("max_num_points", -1) > 0:
+                    voxelize_module = Voxelization(**encoders["lidar"]["voxelize"])
+                else:
+                    voxelize_module = DynamicScatter(**encoders["lidar"]["voxelize"])
+                self.encoders["lidar"] = nn.ModuleDict(
+                    {
+                        "voxelize": voxelize_module,
+                        "backbone": build_backbone(encoders["lidar"]["backbone"]),
+                    }
+                )
+                self.voxelize_reduce = encoders["lidar"].get("voxelize_reduce", True)
 
-        if encoders.get("radar") is not None:
-            if encoders["radar"]["voxelize"].get("max_num_points", -1) > 0:
-                voxelize_module = Voxelization(**encoders["radar"]["voxelize"])
-            else:
-                voxelize_module = DynamicScatter(**encoders["radar"]["voxelize"])
-            self.encoders["radar"] = nn.ModuleDict(
-                {
-                    "voxelize": voxelize_module,
-                    "backbone": build_backbone(encoders["radar"]["backbone"]),
-                }
-            )
-            self.voxelize_reduce = encoders["radar"].get("voxelize_reduce", True)
+            if encoders.get("radar") is not None:
+                if encoders["radar"]["voxelize"].get("max_num_points", -1) > 0:
+                    voxelize_module = Voxelization(**encoders["radar"]["voxelize"])
+                else:
+                    voxelize_module = DynamicScatter(**encoders["radar"]["voxelize"])
+                self.encoders["radar"] = nn.ModuleDict(
+                    {
+                        "voxelize": voxelize_module,
+                        "backbone": build_backbone(encoders["radar"]["backbone"]),
+                    }
+                )
+                self.voxelize_reduce = encoders["radar"].get("voxelize_reduce", True)
+        else:
+            self.encoders = None
 
         if fuser is not None:
             self.fuser = build_fuser(fuser)
         else:
             self.fuser = None
 
-        self.decoder = nn.ModuleDict(
-            {
-                "backbone": build_backbone(decoder["backbone"]),
-                "neck": build_neck(decoder["neck"]),
-            }
-        )
-        self.heads = nn.ModuleDict()
-        for name in heads:
-            if heads[name] is not None:
-                self.heads[name] = build_head(heads[name])
+        if decoder is not None:
+            self.decoder = nn.ModuleDict(
+                {
+                    "backbone": build_backbone(decoder["backbone"]),
+                    "neck": build_neck(decoder["neck"]),
+                }
+            )
+        if heads is not None:
+            self.heads = nn.ModuleDict()
+            for name in heads:
+                if heads[name] is not None:
+                    self.heads[name] = build_head(heads[name])
 
         if "loss_scale" in kwargs:
             self.loss_scale = kwargs["loss_scale"]
         else:
-            self.loss_scale = dict()
-            for name in heads:
-                if heads[name] is not None:
-                    self.loss_scale[name] = 1.0
+            if heads is not None:
+                self.loss_scale = dict()
+                for name in heads:
+                    if heads[name] is not None:
+                        self.loss_scale[name] = 1.0
 
-        # If the camera's vtransform is a BEVDepth version, then we're using depth loss. 
-        self.use_depth_loss = ((encoders.get('camera', {}) or {}).get('vtransform', {}) or {}).get('type', '') in ['BEVDepth', 'AwareBEVDepth', 'DBEVDepth', 'AwareDBEVDepth']
-
+        # If the camera's vtransform is a BEVDepth version, then we're using depth loss.
+        if encoders is not None:
+            self.use_depth_loss = ((encoders.get('camera', {}) or {}).get('vtransform', {}) or {}).get('type', '') in [
+                'BEVDepth', 'AwareBEVDepth', 'DBEVDepth', 'AwareDBEVDepth']
 
         self.init_weights()
 
     def init_weights(self) -> None:
-        if "camera" in self.encoders:
+        if self.encoders is not None and "camera" in self.encoders:
+            # print("\n暂时去掉，前面已经init过了\n")
             self.encoders["camera"]["backbone"].init_weights()
 
     def extract_camera_features(
-        self,
-        x,
-        points,
-        radar_points,
-        camera2ego,
-        lidar2ego,
-        lidar2camera,
-        lidar2image,
-        camera_intrinsics,
-        camera2lidar,
-        img_aug_matrix,
-        lidar_aug_matrix,
-        img_metas,
-        gt_depths=None,
+            self,
+            x,
+            points,
+            radar_points,
+            camera2ego,
+            lidar2ego,
+            lidar2camera,
+            lidar2image,
+            camera_intrinsics,
+            camera2lidar,
+            img_aug_matrix,
+            lidar_aug_matrix,
+            img_metas,
+            gt_depths=None,
     ) -> torch.Tensor:
         B, N, C, H, W = x.size()
+        # print("x.size:", x.size()) # [4, 6, 3, 256, 704]
         x = x.view(B * N, C, H, W)
 
         x = self.encoders["camera"]["backbone"](x)
         x = self.encoders["camera"]["neck"](x)
 
         if not isinstance(x, torch.Tensor):
-            x = x[0]
+            BN, C, H, W = x[0].size()
+            if H == 32 and W == 88:
+                x = x[0]
+            else:
+                x = x[1]
 
         BN, C, H, W = x.size()
         x = x.view(B, int(BN / B), C, H, W)
@@ -143,17 +155,17 @@ class BEVFusion(Base3DFusionModel):
             img_aug_matrix,
             lidar_aug_matrix,
             img_metas,
-            depth_loss=self.use_depth_loss, 
+            depth_loss=self.use_depth_loss,
             gt_depths=gt_depths,
         )
         return x
-    
+
     def extract_features(self, x, sensor) -> torch.Tensor:
         feats, coords, sizes = self.voxelize(x, sensor)
         batch_size = coords[-1, 0] + 1
         x = self.encoders[sensor]["backbone"](feats, coords, batch_size, sizes=sizes)
         return x
-    
+
     # def extract_lidar_features(self, x) -> torch.Tensor:
     #     feats, coords, sizes = self.voxelize(x)
     #     batch_size = coords[-1, 0] + 1
@@ -228,24 +240,24 @@ class BEVFusion(Base3DFusionModel):
 
     @auto_fp16(apply_to=("img", "points"))
     def forward(
-        self,
-        img,
-        points,
-        camera2ego,
-        lidar2ego,
-        lidar2camera,
-        lidar2image,
-        camera_intrinsics,
-        camera2lidar,
-        img_aug_matrix,
-        lidar_aug_matrix,
-        metas,
-        depths,
-        radar=None,
-        gt_masks_bev=None,
-        gt_bboxes_3d=None,
-        gt_labels_3d=None,
-        **kwargs,
+            self,
+            img,
+            points,
+            camera2ego,
+            lidar2ego,
+            lidar2camera,
+            lidar2image,
+            camera_intrinsics,
+            camera2lidar,
+            img_aug_matrix,
+            lidar_aug_matrix,
+            metas,
+            depths,
+            radar=None,
+            gt_masks_bev=None,
+            gt_bboxes_3d=None,
+            gt_labels_3d=None,
+            **kwargs,
     ):
         if isinstance(img, list):
             raise NotImplementedError
@@ -273,29 +285,29 @@ class BEVFusion(Base3DFusionModel):
 
     @auto_fp16(apply_to=("img", "points"))
     def forward_single(
-        self,
-        img,
-        points,
-        camera2ego,
-        lidar2ego,
-        lidar2camera,
-        lidar2image,
-        camera_intrinsics,
-        camera2lidar,
-        img_aug_matrix,
-        lidar_aug_matrix,
-        metas,
-        depths=None,
-        radar=None,
-        gt_masks_bev=None,
-        gt_bboxes_3d=None,
-        gt_labels_3d=None,
-        **kwargs,
+            self,
+            img,
+            points,
+            camera2ego,
+            lidar2ego,
+            lidar2camera,
+            lidar2image,
+            camera_intrinsics,
+            camera2lidar,
+            img_aug_matrix,
+            lidar_aug_matrix,
+            metas,
+            depths=None,
+            radar=None,
+            gt_masks_bev=None,
+            gt_bboxes_3d=None,
+            gt_labels_3d=None,
+            **kwargs,
     ):
         features = []
         auxiliary_losses = {}
         for sensor in (
-            self.encoders if self.training else list(self.encoders.keys())[::-1]
+                self.encoders if self.training else list(self.encoders.keys())[::-1]
         ):
             if sensor == "camera":
                 feature = self.extract_camera_features(
@@ -315,6 +327,7 @@ class BEVFusion(Base3DFusionModel):
                 )
                 if self.use_depth_loss:
                     feature, auxiliary_losses['depth'] = feature[0], feature[-1]
+                # print("feature shape: ", feature.shape) # [4, 80, 180, 180]
             elif sensor == "lidar":
                 feature = self.extract_features(points, sensor)
             elif sensor == "radar":
@@ -387,3 +400,402 @@ class BEVFusion(Base3DFusionModel):
                     raise ValueError(f"unsupported head: {type}")
             return outputs
 
+    # Get the fused feature of the teacher model
+    @auto_fp16(apply_to=("img", "points"))
+    def get_voxel_and_fused_feature_teacher(
+            self,
+            img,
+            points,
+            camera2ego,
+            lidar2ego,
+            lidar2camera,
+            lidar2image,
+            camera_intrinsics,
+            camera2lidar,
+            img_aug_matrix,
+            lidar_aug_matrix,
+            metas,
+            depths=None,
+            radar=None,
+            **kwargs,
+    ):
+        features = []
+        for sensor in (
+                self.encoders if self.training else list(self.encoders.keys())[::-1]
+        ):
+            if sensor == "camera":
+                feature = self.extract_camera_features(
+                    img,
+                    points,
+                    radar,
+                    camera2ego,
+                    lidar2ego,
+                    lidar2camera,
+                    lidar2image,
+                    camera_intrinsics,
+                    camera2lidar,
+                    img_aug_matrix,
+                    lidar_aug_matrix,
+                    metas,
+                    gt_depths=depths,
+                )
+                if self.use_depth_loss:
+                    feature = feature[0]
+            elif sensor == "lidar":
+                # feature = self.extract_features(points, sensor)
+                feats_tea, coords_tea, sizes_tea = self.voxelize(points, sensor)
+                batch_size_tea = coords_tea[-1, 0] + 1
+                feature = self.encoders[sensor]["backbone"](feats_tea, coords_tea, batch_size_tea, sizes=sizes_tea)
+            elif sensor == "radar":
+                feature = self.extract_features(radar, sensor)
+            else:
+                raise ValueError(f"unsupported sensor: {sensor}")
+
+            features.append(feature)
+
+        if not self.training:
+            # avoid OOM
+            features = features[::-1]
+
+        if self.fuser is not None:
+            _, x, _, _ = self.fuser(features)
+        else:
+            assert len(features) == 1, features
+            x = features[0]
+
+        return x, feats_tea, coords_tea, sizes_tea
+
+    # Get the fused feature of the teacher model
+    @auto_fp16(apply_to=("img", "points"))
+    def get_fused_feature_teacher(
+            self,
+            img,
+            points,
+            camera2ego,
+            lidar2ego,
+            lidar2camera,
+            lidar2image,
+            camera_intrinsics,
+            camera2lidar,
+            img_aug_matrix,
+            lidar_aug_matrix,
+            metas,
+            depths=None,
+            radar=None,
+            **kwargs,
+    ):
+        features = []
+        camera_feature = None
+        lidar_feature = None
+        for sensor in (
+                self.encoders if self.training else list(self.encoders.keys())[::-1]
+        ):
+            if sensor == "camera":
+                feature = self.extract_camera_features(
+                    img,
+                    points,
+                    radar,
+                    camera2ego,
+                    lidar2ego,
+                    lidar2camera,
+                    lidar2image,
+                    camera_intrinsics,
+                    camera2lidar,
+                    img_aug_matrix,
+                    lidar_aug_matrix,
+                    metas,
+                    gt_depths=depths,
+                )
+                if self.use_depth_loss:
+                    feature = feature[0]
+                camera_feature = feature
+            elif sensor == "lidar":
+                feature = self.extract_features(points, sensor)
+                lidar_feature = feature
+            elif sensor == "radar":
+                feature = self.extract_features(radar, sensor)
+            else:
+                raise ValueError(f"unsupported sensor: {sensor}")
+
+            features.append(feature)
+
+        if not self.training:
+            # avoid OOM
+            features = features[::-1]
+
+        if self.fuser is not None:
+            # _, x, _, _ = self.fuser(features)
+            x = self.fuser(features)
+        else:
+            assert len(features) == 1, features
+            x = features[0]
+
+        return x, camera_feature, lidar_feature
+
+    # Get the features of the teacher model
+    @auto_fp16(apply_to=("img", "points"))
+    def get_feature_teacher(
+            self,
+            img,
+            points,
+            camera2ego,
+            lidar2ego,
+            lidar2camera,
+            lidar2image,
+            camera_intrinsics,
+            camera2lidar,
+            img_aug_matrix,
+            lidar_aug_matrix,
+            metas,
+            depths=None,
+            radar=None,
+            **kwargs,
+    ):
+        features = []
+        # Used for return the lidar feature and camera feature
+        cam_feature = None
+        lidar_feature = None
+        for sensor in (
+                self.encoders if self.training else list(self.encoders.keys())[::-1]
+        ):
+            if sensor == "camera":
+                feature = self.extract_camera_features(
+                    img,
+                    points,
+                    radar,
+                    camera2ego,
+                    lidar2ego,
+                    lidar2camera,
+                    lidar2image,
+                    camera_intrinsics,
+                    camera2lidar,
+                    img_aug_matrix,
+                    lidar_aug_matrix,
+                    metas,
+                    gt_depths=depths,
+                )
+                if self.use_depth_loss:
+                    feature = feature[0]
+                cam_feature = feature
+            elif sensor == "lidar":
+                feature = self.extract_features(points, sensor)
+                lidar_feature = feature
+            elif sensor == "radar":
+                feature = self.extract_features(radar, sensor)
+            else:
+                raise ValueError(f"unsupported sensor: {sensor}")
+
+            features.append(feature)
+
+        if not self.training:
+            # avoid OOM
+            features = features[::-1]
+
+        if self.fuser is not None:
+            _, x, _, _ = self.fuser(features)
+        else:
+            assert len(features) == 1, features
+            x = features[0]
+
+        return x, lidar_feature, cam_feature
+
+    # Get the features of the teacher model
+    @auto_fp16(apply_to=("img", "points"))
+    def get_feature_teacher_relu(
+            self,
+            img,
+            points,
+            camera2ego,
+            lidar2ego,
+            lidar2camera,
+            lidar2image,
+            camera_intrinsics,
+            camera2lidar,
+            img_aug_matrix,
+            lidar_aug_matrix,
+            metas,
+            depths=None,
+            radar=None,
+            **kwargs,
+    ):
+        features = []
+        # Used for return the lidar feature and camera feature
+        cam_feature = None
+        lidar_feature = None
+        for sensor in (
+                self.encoders if self.training else list(self.encoders.keys())[::-1]
+        ):
+            if sensor == "camera":
+                feature = self.extract_camera_features(
+                    img,
+                    points,
+                    radar,
+                    camera2ego,
+                    lidar2ego,
+                    lidar2camera,
+                    lidar2image,
+                    camera_intrinsics,
+                    camera2lidar,
+                    img_aug_matrix,
+                    lidar_aug_matrix,
+                    metas,
+                    gt_depths=depths,
+                )
+                if self.use_depth_loss:
+                    feature = feature[0]
+                cam_feature = feature
+            elif sensor == "lidar":
+                feature = self.extract_features(points, sensor)
+                lidar_feature = feature
+            elif sensor == "radar":
+                feature = self.extract_features(radar, sensor)
+            else:
+                raise ValueError(f"unsupported sensor: {sensor}")
+
+            features.append(feature)
+
+        if not self.training:
+            # avoid OOM
+            features = features[::-1]
+
+        if self.fuser is not None:
+            x_before_relu, x_after_relu, _, _ = self.fuser(features)
+            x = x_after_relu
+        else:
+            assert len(features) == 1, features
+            x = features[0]
+
+        return x_before_relu, x, lidar_feature, cam_feature
+
+    # Get the gated features of the teacher model
+    @auto_fp16(apply_to=("img", "points"))
+    def get_gated_feature_teacher(
+            self,
+            img,
+            points,
+            camera2ego,
+            lidar2ego,
+            lidar2camera,
+            lidar2image,
+            camera_intrinsics,
+            camera2lidar,
+            img_aug_matrix,
+            lidar_aug_matrix,
+            metas,
+            depths=None,
+            radar=None,
+            **kwargs,
+    ):
+        features = []
+        # Used for return the lidar feature and camera feature
+        cam_feature = None
+        lidar_feature = None
+        for sensor in (
+                self.encoders if self.training else list(self.encoders.keys())[::-1]
+        ):
+            if sensor == "camera":
+                feature = self.extract_camera_features(
+                    img,
+                    points,
+                    radar,
+                    camera2ego,
+                    lidar2ego,
+                    lidar2camera,
+                    lidar2image,
+                    camera_intrinsics,
+                    camera2lidar,
+                    img_aug_matrix,
+                    lidar_aug_matrix,
+                    metas,
+                    gt_depths=depths,
+                )
+                if self.use_depth_loss:
+                    feature = feature[0]
+            elif sensor == "lidar":
+                feature = self.extract_features(points, sensor)
+            elif sensor == "radar":
+                feature = self.extract_features(radar, sensor)
+            else:
+                raise ValueError(f"unsupported sensor: {sensor}")
+
+            features.append(feature)
+
+        if not self.training:
+            # avoid OOM
+            features = features[::-1]
+
+        if self.fuser is not None:
+            _, x, cam_feature, lidar_feature = self.fuser(features)
+        else:
+            assert len(features) == 1, features
+            x = features[0]
+
+        return x, lidar_feature, cam_feature
+
+    # Get the neck features of the teacher model
+    @auto_fp16(apply_to=("img", "points"))
+    def get_neck_feature_teacher(
+            self,
+            img,
+            points,
+            camera2ego,
+            lidar2ego,
+            lidar2camera,
+            lidar2image,
+            camera_intrinsics,
+            camera2lidar,
+            img_aug_matrix,
+            lidar_aug_matrix,
+            metas,
+            depths=None,
+            radar=None,
+            **kwargs,
+    ):
+        features = []
+        # Used for return the lidar feature and camera feature
+        cam_feature = None
+        lidar_feature = None
+        for sensor in (
+                self.encoders if self.training else list(self.encoders.keys())[::-1]
+        ):
+            if sensor == "camera":
+                feature = self.extract_camera_features(
+                    img,
+                    points,
+                    radar,
+                    camera2ego,
+                    lidar2ego,
+                    lidar2camera,
+                    lidar2image,
+                    camera_intrinsics,
+                    camera2lidar,
+                    img_aug_matrix,
+                    lidar_aug_matrix,
+                    metas,
+                    gt_depths=depths,
+                )
+                if self.use_depth_loss:
+                    feature = feature[0]
+            elif sensor == "lidar":
+                feature = self.extract_features(points, sensor)
+            elif sensor == "radar":
+                feature = self.extract_features(radar, sensor)
+            else:
+                raise ValueError(f"unsupported sensor: {sensor}")
+
+            features.append(feature)
+
+        if not self.training:
+            # avoid OOM
+            features = features[::-1]
+
+        if self.fuser is not None:
+            _, x, _, _ = self.fuser(features)
+        else:
+            assert len(features) == 1, features
+            x = features[0]
+
+        x = self.decoder["backbone"](x)
+        x = self.decoder["neck"](x)
+
+        return x

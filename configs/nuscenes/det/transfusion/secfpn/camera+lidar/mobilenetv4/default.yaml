@@ -1,0 +1,54 @@
+voxel_size: [0.075, 0.075, 0.2]
+point_cloud_range: [-54.0, -54.0, -5.0, 54.0, 54.0, 3.0]
+
+model:
+  encoders:
+    camera:
+      backbone:
+        type: mobilenetv4_conv_medium
+        num_classes: 1000
+        detection: True
+        pretrained: True
+        init_cfg:
+          type: Pretrained
+          checkpoint: http://rean-song-bucket.oss-cn-guangzhou.aliyuncs.com/autoDL/BEVFusion/ckpts/MobileNetV4ConvMedium.pth
+      neck:
+        in_channels: [48, 80, 160, 256, 1280]
+      vtransform:
+        xbound: [-54.0, 54.0, 0.3]
+        ybound: [-54.0, 54.0, 0.3]
+        height_expand: True
+        add_depth_features: True
+        is_xtransform: false
+    lidar:
+      voxelize:
+        point_cloud_range: ${point_cloud_range}
+        voxel_size: ${voxel_size}
+        max_voxels: [120000, 160000]
+      backbone:
+        sparse_shape: [1440, 1440, 41]
+
+  heads:
+    object:
+      train_cfg:
+        grid_size: [1440, 1440, 41]
+      test_cfg:
+        grid_size: [1440, 1440, 41]
+
+lr_config:
+  policy: CosineAnnealing
+  warmup: linear
+  warmup_iters: 500
+  warmup_ratio: 0.33333333
+  min_lr_ratio: 1.0e-3
+
+log_config:
+  interval: 50
+  hooks:
+    -
+      type: TextLoggerHook
+    -
+      type: TensorboardLoggerHook
+    -
+      type: WandbLoggerHook
+      init_kwargs: {'project': 'BEVFusion-Lite', 'name': 'mobilenetv4-test'}
